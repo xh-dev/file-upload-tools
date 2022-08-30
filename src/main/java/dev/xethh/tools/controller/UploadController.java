@@ -28,11 +28,6 @@ import java.util.function.Function;
 @RestController
 @RequestMapping("api/upload")
 public class UploadController {
-    @GetMapping("")
-    public Mono<String> get(){
-        return Mono.just("hi");
-    }
-
 
     @Data
     public static class PostResponse{
