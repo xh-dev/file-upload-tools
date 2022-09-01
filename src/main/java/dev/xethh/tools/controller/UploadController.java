@@ -153,6 +153,7 @@ public class UploadController {
                     });
                 })
                 .onErrorResume(it -> Mono.just(Scope.apply(new ErrorResponse(), postResponse1 -> {
+                    it.printStackTrace();
                     postResponse1.setMsg(it.getMessage());
                 })))
                 ;
