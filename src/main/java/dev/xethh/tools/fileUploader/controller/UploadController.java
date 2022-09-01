@@ -1,11 +1,11 @@
-package dev.xethh.tools.controller;
+package dev.xethh.tools.fileUploader.controller;
 
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.mongodb.client.model.changestream.OperationType;
-import dev.xethh.tools.FileUploadService;
-import dev.xethh.tools.entity.FileUpload;
-import dev.xethh.tools.repo.UploadFileRepo;
+import dev.xethh.tools.fileUploader.FileUploadService;
+import dev.xethh.tools.fileUploader.entity.FileUpload;
+import dev.xethh.tools.fileUploader.repo.UploadFileRepo;
 import io.vavr.Tuple;
 import io.vavr.control.Try;
 import lombok.Data;

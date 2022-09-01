@@ -1,9 +1,7 @@
-package dev.xethh.tools.repo;
+package dev.xethh.tools.fileUploader.repo;
 
-import dev.xethh.tools.entity.FileUpload;
-import dev.xethh.tools.entity.FileUploadConfirm;
+import dev.xethh.tools.fileUploader.entity.FileUploadConfirm;
 import org.springframework.data.mongodb.repository.ReactiveMongoRepository;
-import reactor.core.publisher.Flux;
 
 public interface UploadFileConfirmRepo extends ReactiveMongoRepository<FileUploadConfirm, String> {
 }

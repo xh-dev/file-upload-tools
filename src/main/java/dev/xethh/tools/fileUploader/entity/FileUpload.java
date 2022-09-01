@@ -1,17 +1,16 @@
-package dev.xethh.tools.entity;
+package dev.xethh.tools.fileUploader.entity;
 
 import lombok.Data;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 @Data
-@Document("confirmed")
-public class FileUploadConfirm {
+@Document("uploaded")
+public class FileUpload {
     @Id
     private String id;
     private String hash;
     private Long size;
     private String fileName;
     private String code;
-    private String originalId;
 }

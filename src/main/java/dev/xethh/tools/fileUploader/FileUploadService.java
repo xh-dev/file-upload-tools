@@ -1,14 +1,13 @@
-package dev.xethh.tools;
+package dev.xethh.tools.fileUploader;
 
-import dev.xethh.tools.entity.FileUpload;
-import dev.xethh.tools.entity.FileUploadConfirm;
-import dev.xethh.tools.repo.UploadFileConfirmRepo;
-import dev.xethh.tools.repo.UploadFileRepo;
+import dev.xethh.tools.fileUploader.entity.FileUpload;
+import dev.xethh.tools.fileUploader.entity.FileUploadConfirm;
+import dev.xethh.tools.fileUploader.repo.UploadFileConfirmRepo;
+import dev.xethh.tools.fileUploader.repo.UploadFileRepo;
 import me.xethh.utils.functionalPacks.Scope;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @Service

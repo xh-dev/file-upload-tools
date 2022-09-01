@@ -1,6 +1,6 @@
-package dev.xethh.tools.repo;
+package dev.xethh.tools.fileUploader.repo;
 
-import dev.xethh.tools.entity.FileUpload;
+import dev.xethh.tools.fileUploader.entity.FileUpload;
 import org.springframework.data.mongodb.repository.ReactiveMongoRepository;
 import reactor.core.publisher.Flux;
 

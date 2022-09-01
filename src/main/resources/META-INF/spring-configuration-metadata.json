@@ -1,0 +1,46 @@
+{"groups": [
+  {
+    "name": "dev.xethh.tools.file-uploader.pubsub",
+    "type": "dev.xethh.tools.fileUploader.pubsub.PubSubProperties",
+    "sourceType": "dev.xethh.tools.fileUploader.pubsub.PubSubProperties",
+    "description": "publish and subscribing configuration"
+  }
+],"properties": [
+  {
+    "name": "dev.xethh.tools.file-uploader.pubsub.url",
+    "sourceType": "dev.xethh.tools.fileUploader.pubsub.PubSubProperties",
+    "type": "java.lang.String"
+  },
+  {
+    "name": "dev.xethh.tools.file-uploader.pubsub.un",
+    "sourceType": "dev.xethh.tools.fileUploader.pubsub.PubSubProperties",
+    "type": "java.lang.String"
+  },
+  {
+    "name": "dev.xethh.tools.file-uploader.pubsub.pwd",
+    "sourceType": "dev.xethh.tools.fileUploader.pubsub.PubSubProperties",
+    "type": "java.lang.String"
+  },
+  {
+    "name": "dev.xethh.tools.file-uploader.pubsub.vpn",
+    "sourceType": "dev.xethh.tools.fileUploader.pubsub.PubSubProperties",
+    "type": "java.lang.String"
+  }
+],"hints": [
+  {
+    "name": "dev.xethh.tools.file-uploader.pubsub.url",
+    "description": "url of the solace connection"
+  },
+  {
+    "name": "dev.xethh.tools.file-uploader.pubsub.un",
+    "description": "user name of the solace connection"
+  },
+  {
+    "name": "dev.xethh.tools.file-uploader.pubsub.pwd",
+    "description": "password of the solace connection"
+  },
+  {
+    "name": "dev.xethh.tools.file-uploader.pubsub.vpn",
+    "description": "vpn name of the solace connection"
+  }
+]}

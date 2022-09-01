@@ -5,3 +5,12 @@ spring:
 logging:
   level:
     root: info
+dev:
+  xethh:
+    tools:
+      file-uploader:
+        pubsub:
+          url: tcps://mr5j7axd0ewnx.messaging.solace.cloud:55443
+          un: solace-cloud-client
+          pwd: q84fd5262lnd5lci1obs7keqef
+          vpn: test-service
