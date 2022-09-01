@@ -59,7 +59,7 @@ public class UploadController {
                     System.out.println("Index "+index+" - "+obj);
                     return obj;
                 })
-//                .flatMap(it->fileUploadService.confirm(it))
+                .flatMap(it->fileUploadService.confirm(it))
                 .subscribe();
 
 
