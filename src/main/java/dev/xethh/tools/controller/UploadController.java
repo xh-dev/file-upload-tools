@@ -2,33 +2,37 @@ package dev.xethh.tools.controller;
 
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.xethh.utils.WrappedResult.wrappedResult.WrappedResult;
+import com.mongodb.client.model.changestream.OperationType;
+import dev.xethh.tools.FileUploadService;
+import dev.xethh.tools.entity.FileUpload;
+import dev.xethh.tools.repo.UploadFileRepo;
 import io.vavr.Tuple;
-import io.vavr.Tuple2;
-import io.vavr.control.Option;
 import io.vavr.control.Try;
-import lombok.Builder;
 import lombok.Data;
 import me.xethh.utils.functionalPacks.Scope;
-import org.apache.commons.codec.digest.DigestUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.multipart.FilePart;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
-import java.io.*;
-import java.lang.annotation.Repeatable;
-import java.nio.channels.Channel;
+import javax.annotation.PostConstruct;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.ReadableByteChannel;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
@@ -36,7 +40,43 @@ import java.util.function.Function;
 @RestController
 @RequestMapping("api/upload")
 public class UploadController {
+    @Autowired
+    ReactiveMongoTemplate template;
 
+    @Autowired
+    FileUploadService fileUploadService;
+    @PostConstruct
+    public void postConstruct(){
+        template.changeStream(FileUpload.class)
+                .watchCollection("uploaded")
+                .listen()
+                .subscribeOn(Schedulers.boundedElastic())
+                .filter(it->OperationType.INSERT.equals(it.getRaw().getOperationType()))
+                .zipWith(Flux.range(0, 999999999), (event, index)-> Tuple.of(index, event.getBody()))
+                .map(it->{
+                    Integer index = it._1;
+                    FileUpload obj = it._2;
+                    System.out.println("Index "+index+" - "+obj);
+                    return obj;
+                })
+//                .flatMap(it->fileUploadService.confirm(it))
+                .subscribe();
+
+
+
+        Flux.interval(Duration.of(1, ChronoUnit.MINUTES))
+                .subscribeOn(Schedulers.boundedElastic())
+                .map(it->{
+                    System.out.println("Round "+it);
+                    return it;
+                })
+                .flatMap(it->uploadFileRepo.findAll())
+                .flatMap(it->fileUploadService.confirm(it))
+                .subscribe();
+    }
+
+    @Autowired
+    UploadFileRepo uploadFileRepo;
     @JsonTypeInfo(
             use = JsonTypeInfo.Id.NAME,
             property = "type")
@@ -49,6 +89,7 @@ public class UploadController {
 
     @Data
     public static class PostResponse implements Response {
+        private String id;
         private Boolean success = true;
         private String fileName;
         private Long size;
@@ -93,10 +134,22 @@ public class UploadController {
                 })
                 .map(fileName -> {
                     String computedHash = HexFormat.of().formatHex(digestSha256.digest());
-                    return (Response) Scope.apply(new PostResponse(), postResponse1 -> {
+                    return Scope.apply(new PostResponse(), postResponse1 -> {
                         postResponse1.setFileName(fileName);
                         postResponse1.setSize(file.length());
                         postResponse1.setHash(computedHash);
+                    });
+                })
+                .flatMap(it->{
+                    FileUpload fu = Scope.apply(new FileUpload(), fileUpload -> {
+                        fileUpload.setFileName(it.fileName);
+                        fileUpload.setCode(code);
+                        fileUpload.setHash(it.hash);
+                        fileUpload.setSize(it.size);
+                    });
+                    return uploadFileRepo.save(fu).map(up->{
+                        it.setId(up.getId());
+                        return (Response) it;
                     });
                 })
                 .onErrorResume(it -> Mono.just(Scope.apply(new ErrorResponse(), postResponse1 -> {
