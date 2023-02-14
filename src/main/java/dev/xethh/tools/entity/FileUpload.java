@@ -9,8 +9,11 @@ import org.springframework.data.mongodb.core.mapping.Document;
 public class FileUpload {
     @Id
     private String id;
-    private String hash;
+    private String sha2;
+    private String sha3;
+    private Long revision;
     private Long size;
     private String fileName;
     private String code;
+    private String fileUuidCode;
 }
