@@ -12,8 +12,6 @@ public class FileUploadService {
     @Autowired
     UploadFileRepo uploadFileRepo;
 
-    @Autowired
-    TransactionalOperator transactionalOperator;
 
     public Mono<FileUpload> save(FileUpload fileUpload) {
         return uploadFileRepo

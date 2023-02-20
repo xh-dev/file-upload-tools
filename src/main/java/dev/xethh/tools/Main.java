@@ -2,6 +2,8 @@ package dev.xethh.tools;
 
 import com.mongodb.reactivestreams.client.MongoClient;
 import com.mongodb.reactivestreams.client.MongoClients;
+import dev.xethh.libs.toolkits.commons.encryption.RSAFormatting;
+import dev.xethh.libs.toolkits.commons.encryption.RsaEncryption;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
@@ -17,15 +19,23 @@ import org.springframework.web.reactive.function.server.RouterFunction;
 import org.springframework.web.reactive.function.server.RouterFunctions;
 import org.springframework.web.reactive.function.server.ServerResponse;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+
 @SpringBootApplication
 @EnableReactiveMongoRepositories
 public class Main {
     public static void main(String[] args) {
         SpringApplication.run(Main.class);
-    }
-
-    public @Bean MongoClient mongoClient() {
-        return MongoClients.create();
+//        var keyPair = RsaEncryption.keyPair();
+//        try {
+//            new FileOutputStream(new File("pub.pem")).write(keyPair.getPublic().getEncoded());
+//            new FileOutputStream(new File("pri.pem")).write(keyPair.getPrivate().getEncoded());
+//        } catch (IOException e) {
+//            throw new RuntimeException(e);
+//        }
+//        System.out.println("hi");
     }
 
     @Bean
