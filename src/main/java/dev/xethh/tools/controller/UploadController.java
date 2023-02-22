@@ -1,12 +1,17 @@
 package dev.xethh.tools.controller;
 
+import com.auth0.jwt.interfaces.DecodedJWT;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import com.mongodb.client.model.changestream.OperationType;
 import dev.xethh.tools.FileUploadService;
+import dev.xethh.tools.config.CustConfig;
 import dev.xethh.tools.entity.FileUpload;
+import dev.xethh.tools.jwt.JwtService;
 import dev.xethh.tools.repo.UploadFileRepo;
+import dev.xethh.tools.utils.FileUtils;
+import dev.xethh.tools.utils.PathUtils;
 import io.vavr.Tuple;
+import io.vavr.Tuple2;
 import io.vavr.control.Try;
 import lombok.Data;
 import me.xethh.utils.functionalPacks.Scope;
@@ -14,69 +19,39 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.mongodb.core.ReactiveMongoTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.multipart.FilePart;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestPart;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.transaction.reactive.TransactionalOperator;
+import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
-import javax.annotation.PostConstruct;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.ReadableByteChannel;
+import java.nio.file.Files;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
-import java.time.Duration;
-import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 
 @RestController
-@RequestMapping("api/upload")
+@RequestMapping("api/upload/{user-scope}")
 public class UploadController {
     @Autowired
     ReactiveMongoTemplate template;
 
     @Autowired
     FileUploadService fileUploadService;
-    @PostConstruct
-    public void postConstruct(){
-        template.changeStream(FileUpload.class)
-                .watchCollection("uploaded")
-                .listen()
-                .subscribeOn(Schedulers.boundedElastic())
-                .filter(it->OperationType.INSERT.equals(it.getRaw().getOperationType()))
-                .zipWith(Flux.range(0, 999999999), (event, index)-> Tuple.of(index, event.getBody()))
-                .map(it->{
-                    Integer index = it._1;
-                    FileUpload obj = it._2;
-                    System.out.println("Index "+index+" - "+obj);
-                    return obj;
-                })
-                .flatMap(it->fileUploadService.confirm(it))
-                .subscribe();
-
-
-
-        Flux.interval(Duration.of(1, ChronoUnit.MINUTES))
-                .subscribeOn(Schedulers.boundedElastic())
-                .map(it->{
-                    System.out.println("Round "+it);
-                    return it;
-                })
-                .flatMap(it->uploadFileRepo.findAll())
-                .flatMap(it->fileUploadService.confirm(it))
-                .subscribe();
-    }
 
     @Autowired
     UploadFileRepo uploadFileRepo;
+
     @JsonTypeInfo(
             use = JsonTypeInfo.Id.NAME,
             property = "type")
@@ -90,10 +65,15 @@ public class UploadController {
     @Data
     public static class PostResponse implements Response {
         private String id;
+        private UploadType uploadType;
+        private String userScope;
+        private String path;
         private Boolean success = true;
         private String fileName;
         private Long size;
-        private String hash;
+        private String sha2;
+        private String sha3;
+        private Long revision;
     }
 
     @Data
@@ -101,56 +81,242 @@ public class UploadController {
         private Boolean success = true;
         private String msg;
     }
-    Function<UUID, File> fileSupplier = (uuid ->
-            Try.of(() -> new File("./target/uploads").mkdirs())
+
+    @Autowired
+    CustConfig custConfig;
+    //    final String defaultTempDir = "./target/uploads/temp";
+    Function<String, File> fileSupplier = (uuid ->
+            Try.of(() -> new File(custConfig.tempDir()).mkdirs())
                     .map(it ->
-                            new File(String.format("./target/uploads/%s", uuid.toString()))
+                            new File(String.format("%s/%s", custConfig.tempDir(), uuid))
                     ).get()
     );
 
-    @PostMapping(produces = {MediaType.APPLICATION_JSON_VALUE})
+    //    final String defaultFinalDir = "./target/uploads/final";
+    Function<String, File> finalFileSupplier = (objectId ->
+            Try.of(() -> new File(custConfig.finalDir()).mkdirs())
+                    .map(it ->
+                            new File(String.format("%s/%s", custConfig.finalDir(), objectId))
+                    ).get()
+    );
+
+    @Autowired
+    TransactionalOperator transactionalOperator;
+
+    static final String prefix = "Bearer";
+    static final String sha2Algo = "SHA-256";
+    static final String sha3Algo = "SHA3-256";
+
+
+    public enum UploadType {
+        INSERT, NO_CHANGE, MODIFY_FILE, MODIFY_FIELD
+    }
+
+    public record PostContextStage1(File tempFilePath, MessageDigest sha2Digest, MessageDigest sh3Digest,
+                                    FilePart filePart, String userScope, String path) {
+    }
+
+    public record PostContextStage2(File tempFilePath, String sha2, String sha3, String userScope, String path) {
+    }
+
+    private Mono<DecodedJWT> extractJwt(String userScope, String authorization) {
+        return Mono.just(authorization)
+                .filter(authStr -> authStr != null && !authStr.equals(""))
+                .switchIfEmpty(Mono.error(new RuntimeException("Authorization is empty")))
+                .filter(authStr -> authStr.startsWith(prefix))
+                .switchIfEmpty(Mono.error(new RuntimeException("Authorization is not Bearer")))
+                .map(authStr -> authStr.split(" "))
+                .filter(authorizationArray -> authorizationArray.length == 2)
+                .switchIfEmpty(Mono.error(new RuntimeException("Authorization not expected format")))
+                .map(authorizationArray -> authorizationArray[1])
+                .map(token -> jwtService.verify(token, JwtService.SCOPE, userScope))
+                .switchIfEmpty(Mono.error(new RuntimeException("Authorization is not valid")))
+                ;
+
+    }
+
+    private Mono<String> validUserScope(String userScope) {
+        return Mono.just(userScope)
+                .filter(it -> it != null && !it.equals(""))
+                .switchIfEmpty(Mono.error(new RuntimeException("User scope is empty")));
+    }
+
+    private Mono<String> validPath(String path) {
+        return Mono.just(path)
+                .filter(it -> it != null && !it.equals(""))
+                .switchIfEmpty(Mono.error(new RuntimeException("Path is empty")))
+                .filter(PathUtils::isUnixFilePath)
+                .switchIfEmpty(Mono.error(new RuntimeException("Path is not unix file path")))
+                ;
+    }
+
+    private PostResponse toDto(FileUpload fu){
+        return Scope.apply(new PostResponse(), postResponse1 -> {
+            postResponse1.setFileName(fu.getPath());
+            postResponse1.setSize(fu.getSize());
+            postResponse1.setSha2(fu.getSha2());
+            postResponse1.setSha3(fu.getSha3());
+
+            postResponse1.setId(fu.getId());
+            postResponse1.setRevision(fu.getRevision());
+            postResponse1.setPath(fu.getPath());
+            postResponse1.setPath(fu.getPath());
+            postResponse1.setUserScope(fu.getUserScope());
+        });
+    }
+    @PostMapping(produces = {MediaType.APPLICATION_JSON_VALUE}, consumes = {MediaType.MULTIPART_FORM_DATA_VALUE})
     public Mono<Response> post(
-            @RequestPart("code") String code,
-            @RequestPart("file") Mono<FilePart> fileMono
+            @RequestHeader("Authorization") String authorization,
+            @RequestPart("path") String path,
+            @RequestPart("file") Mono<FilePart> fileMono,
+            @PathVariable("user-scope") String userScope
     ) {
-        File file = fileSupplier.apply(UUID.randomUUID());
 
-        MessageDigest digestSha256 = Try.of(() -> MessageDigest.getInstance("SHA-256")).get();
-
-        return fileMono
-                .flatMap(it -> {
-                    FileChannel osChannel = Try.of(() -> new FileOutputStream(file).getChannel()).get();
+        return validUserScope(userScope)
+                .flatMap(it -> validPath(path))
+                .flatMap(it -> extractJwt(userScope, authorization))
+                .flatMap(it -> fileMono)
+                .map(filePart ->
+                        new PostContextStage1(
+                                fileSupplier.apply(UUID.randomUUID().toString()),
+                                Try.of(() -> MessageDigest.getInstance(sha2Algo)).get(),
+                                Try.of(() -> MessageDigest.getInstance(sha3Algo)).get(),
+                                filePart,
+                                userScope,
+                                path
+                        )
+                )
+                .flatMap(context -> {
+                    FileChannel osChannel = Try.of(() -> new FileOutputStream(context.tempFilePath).getChannel()).get();
                     AtomicLong cur = new AtomicLong(0);
-                    return it.content().map(buffer ->
-                                    Try.of(() -> {
-                                        int length = buffer.asInputStream().available();
-                                        ReadableByteChannel channelRead = Channels.newChannel(new DigestInputStream(buffer.asInputStream(), digestSha256));
-                                        osChannel.transferFrom(channelRead, cur.get(), length);
-                                        cur.addAndGet(length);
-                                        return 1;
-                                    }).get()).then(Mono.just(1))
-                            .map(rs -> it.filename())
+                    return context.filePart.content().reduce(context, (noUsed, buffer) -> {
+                                var inStream = buffer.asInputStream();
+                                var length = Try.of(() -> inStream.available()).get();
+                                var channelRead = Channels.newChannel(
+                                        new DigestInputStream(
+                                                new DigestInputStream(inStream, context.sha2Digest),
+                                                context.sh3Digest
+                                        )
+                                );
+                                FileUtils.transfer(osChannel, channelRead, length, cur);
+                                return noUsed;
+                            })
+                            .then(Mono.just(context))
+                            .map(self -> {
+                                return Try.of(() -> {
+                                    osChannel.close();
+                                    return new PostContextStage2(
+                                            self.tempFilePath,
+                                            HexFormat.of().formatHex(self.sha2Digest.digest()),
+                                            HexFormat.of().formatHex(self.sh3Digest.digest()),
+                                            self.userScope,
+                                            self.path
+                                    );
+                                }).get();
+                            })
                             ;
                 })
-                .map(fileName -> {
-                    String computedHash = HexFormat.of().formatHex(digestSha256.digest());
-                    return Scope.apply(new PostResponse(), postResponse1 -> {
-                        postResponse1.setFileName(fileName);
-                        postResponse1.setSize(file.length());
-                        postResponse1.setHash(computedHash);
-                    });
+                .flatMap(context -> {
+                    return transactionalOperator.transactional(
+                            uploadFileRepo.findAllByUserScopeAndPath(context.userScope(), context.path)
+                                    .reduce(Tuple.<FileUpload, FileUpload, Long>of(null, null, 0L), (a, b) -> {
+                                        var topRecord = a._1;
+                                        var originalFile = a._2;
+                                        var maxNum = a._3;
+
+                                        return Tuple.of(
+                                                topRecord == null ? b : (topRecord.getRevision() > b.getRevision() ? topRecord : b),
+                                                Optional.of(b)
+                                                        .filter(it -> it.getSha2().equals(context.sha2()))
+                                                        .filter(it -> it.getSha3().equals(context.sha3()))
+                                                        .filter(it -> it.getSize().equals(context.tempFilePath.length()))
+                                                        .map(it -> {
+                                                                    if (originalFile == null) {
+                                                                        return it;
+                                                                    } else {
+                                                                        return originalFile.getRevision() > it.getRevision() ? it : originalFile;
+                                                                    }
+                                                                }
+                                                        ).orElse(null)
+                                                , Math.max(b.getRevision(), maxNum)
+                                        );
+                                    })
+                                    .<Tuple2<UploadType, FileUpload>>flatMap(tuple -> {
+                                        var topRecord = tuple._1;
+                                        var originalFile = tuple._2;
+                                        var maxNum = tuple._3;
+
+                                        if (topRecord == null) {
+                                            return uploadFileRepo.save(
+                                                            new FileUpload(
+                                                                    null,
+                                                                    context.userScope(),
+                                                                    context.path(),
+                                                                    context.sha2(),
+                                                                    context.sha3(),
+                                                                    1L,
+                                                                    context.tempFilePath().length(),
+                                                                    ""
+                                                            )
+                                                    )
+                                                    .flatMap(fu -> {
+                                                        fu.setRefFile(fu.getId());
+                                                        return uploadFileRepo.save(fu);
+                                                    })
+                                                    .map(fu -> Tuple.of(UploadType.INSERT, fu))
+                                                    ;
+                                        } else {
+                                            if (originalFile.getRevision() == maxNum) {
+                                                return Mono.just(Tuple.of(UploadType.NO_CHANGE, originalFile));
+                                            } else {
+                                                return uploadFileRepo.save(
+                                                                new FileUpload(
+                                                                        null,
+                                                                        context.userScope,
+                                                                        context.path,
+                                                                        context.sha2,
+                                                                        context.sha3,
+                                                                        maxNum + 1L,
+                                                                        context.tempFilePath.length(),
+                                                                        Optional.ofNullable(originalFile).map(FileUpload::getRefFile).orElse("")
+                                                                )
+                                                        )
+                                                        .flatMap(fu -> {
+                                                            if (originalFile == null) {
+                                                                return Mono.just(fu)
+                                                                        .thenReturn(Tuple.of(UploadType.MODIFY_FIELD, fu));
+                                                            } else {
+                                                                fu.setRefFile(fu.getId());
+                                                                return uploadFileRepo.save(fu)
+                                                                        .map(fu1 -> Tuple.of(UploadType.MODIFY_FILE, fu1));
+                                                            }
+                                                        })
+                                                        ;
+                                            }
+                                        }
+                                    })
+                                    .doOnNext(pair -> {
+                                        var uploadType = pair._1;
+                                        var fu = pair._2;
+                                        Try.run(() -> {
+                                                    switch (uploadType) {
+                                                        case INSERT:
+                                                        case MODIFY_FILE:
+                                                            FileUtils.moveFile(context.tempFilePath, finalFileSupplier.apply(fu.getId()));
+                                                            break;
+                                                        case MODIFY_FIELD:
+                                                        case NO_CHANGE:
+                                                            FileUtils.deleteFile(context.tempFilePath);
+                                                            break;
+                                                    }
+                                                }
+                                        ).get();
+                                    })
+                    );
                 })
-                .flatMap(it->{
-                    FileUpload fu = Scope.apply(new FileUpload(), fileUpload -> {
-                        fileUpload.setFileName(it.fileName);
-                        fileUpload.setCode(code);
-                        fileUpload.setHash(it.hash);
-                        fileUpload.setSize(it.size);
-                    });
-                    return uploadFileRepo.save(fu).map(up->{
-                        it.setId(up.getId());
-                        return (Response) it;
-                    });
+                .map(context -> {
+                    var fu = context._2;
+                    return (Response) toDto(fu);
                 })
                 .onErrorResume(it -> Mono.just(Scope.apply(new ErrorResponse(), postResponse1 -> {
                     it.printStackTrace();
@@ -158,4 +324,33 @@ public class UploadController {
                 })))
                 ;
     }
+
+
+    @GetMapping
+    public Flux<Response> get(
+            @PathVariable("user-scope") String userScope,
+            @RequestHeader("Authorization") String authorization,
+            @RequestParam(value = "regex", required = false) String regex
+    ) {
+        return validUserScope(userScope)
+                .flatMap(it -> extractJwt(userScope, authorization))
+                .map(jwt->{
+                    if(regex!=null && !regex.equals("")){
+                        return Tuple.of(jwt, regex);
+                    } else{
+                        return Tuple.of(jwt, ".*");
+                    }
+                })
+                .flatMapMany(it->uploadFileRepo.findAllByUserScopeAndPathRegex(userScope, it._2))
+                .map(this::toDto)
+                .map(it->(Response)it)
+                .onErrorResume(it -> Mono.just(Scope.apply(new ErrorResponse(), postResponse1 -> {
+                    it.printStackTrace();
+                    postResponse1.setMsg(it.getMessage());
+                })))
+                ;
+    }
+
+    @Autowired
+    JwtService jwtService;
 }

@@ -1,0 +1,39 @@
+version: "3.9"
+networks:
+  file-upload-net:
+    driver: bridge
+services:
+  mongo:
+    image: mongo:6
+    networks:
+      - file-upload-net
+    volumes:
+      - ./mongo/config:/data/config
+      - ./mongo/data:/data/db
+      - ./mongo/init/:/scripts/
+    restart: always
+    entrypoint: ["/usr/bin/mongod", "--port","27017", "--config", "/data/config/mongodb.conf"]
+    extra_hosts:
+      - mongo.example.com:127.0.0.1
+    healthcheck:
+      test: ["CMD", "/scripts/init.sh"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+  file-upload:
+    build:
+      context: ../..
+      args:
+        - progress=plain
+    networks:
+      - file-upload-net
+    volumes:
+      - ./file-upload/keyPair:/keyPair
+      - ./file-upload/data:/data
+    links:
+      - "mongo:mongo.example.com"
+    depends_on:
+      - mongo
+    ports:
+      - "8080:8080"
+
