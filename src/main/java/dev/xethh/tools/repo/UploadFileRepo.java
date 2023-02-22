@@ -7,4 +7,5 @@ import reactor.core.publisher.Mono;
 
 public interface UploadFileRepo extends ReactiveMongoRepository<FileUpload, String> {
     Flux<FileUpload> findAllByUserScopeAndPath(String userScope, String path);
+    Flux<FileUpload> findAllByUserScopeAndPathRegex(String userScope, String regex);
 }

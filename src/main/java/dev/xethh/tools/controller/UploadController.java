@@ -1,5 +1,6 @@
 package dev.xethh.tools.controller;
 
+import com.auth0.jwt.interfaces.DecodedJWT;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import dev.xethh.tools.FileUploadService;
@@ -20,6 +21,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.io.File;
@@ -36,6 +38,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 
 @RestController
 @RequestMapping("api/upload/{user-scope}")
@@ -116,23 +119,8 @@ public class UploadController {
     public record PostContextStage2(File tempFilePath, String sha2, String sha3, String userScope, String path) {
     }
 
-    @PostMapping(produces = {MediaType.APPLICATION_JSON_VALUE}, consumes = {MediaType.MULTIPART_FORM_DATA_VALUE})
-    public Mono<Response> post(
-            @RequestHeader("Authorization") String authorization,
-            @RequestPart("path") String path,
-            @RequestPart("file") Mono<FilePart> fileMono,
-            @PathVariable("user-scope") String userScope
-    ) {
-
-        return Mono.just(userScope)
-                .filter(it -> it != null && !it.equals(""))
-                .switchIfEmpty(Mono.error(new RuntimeException("User scope is empty")))
-                .map(it -> path)
-                .filter(it -> it != null && !it.equals(""))
-                .switchIfEmpty(Mono.error(new RuntimeException("Path is empty")))
-                .filter(PathUtils::isUnixFilePath)
-                .switchIfEmpty(Mono.error(new RuntimeException("Path is not unix file path")))
-                .map(it -> authorization)
+    private Mono<DecodedJWT> extractJwt(String userScope, String authorization) {
+        return Mono.just(authorization)
                 .filter(authStr -> authStr != null && !authStr.equals(""))
                 .switchIfEmpty(Mono.error(new RuntimeException("Authorization is empty")))
                 .filter(authStr -> authStr.startsWith(prefix))
@@ -141,8 +129,52 @@ public class UploadController {
                 .filter(authorizationArray -> authorizationArray.length == 2)
                 .switchIfEmpty(Mono.error(new RuntimeException("Authorization not expected format")))
                 .map(authorizationArray -> authorizationArray[1])
-                .filter(token -> jwtService.verify(token, JwtService.SCOPE, userScope).isPresent())
+                .map(token -> jwtService.verify(token, JwtService.SCOPE, userScope))
                 .switchIfEmpty(Mono.error(new RuntimeException("Authorization is not valid")))
+                ;
+
+    }
+
+    private Mono<String> validUserScope(String userScope) {
+        return Mono.just(userScope)
+                .filter(it -> it != null && !it.equals(""))
+                .switchIfEmpty(Mono.error(new RuntimeException("User scope is empty")));
+    }
+
+    private Mono<String> validPath(String path) {
+        return Mono.just(path)
+                .filter(it -> it != null && !it.equals(""))
+                .switchIfEmpty(Mono.error(new RuntimeException("Path is empty")))
+                .filter(PathUtils::isUnixFilePath)
+                .switchIfEmpty(Mono.error(new RuntimeException("Path is not unix file path")))
+                ;
+    }
+
+    private PostResponse toDto(FileUpload fu){
+        return Scope.apply(new PostResponse(), postResponse1 -> {
+            postResponse1.setFileName(fu.getPath());
+            postResponse1.setSize(fu.getSize());
+            postResponse1.setSha2(fu.getSha2());
+            postResponse1.setSha3(fu.getSha3());
+
+            postResponse1.setId(fu.getId());
+            postResponse1.setRevision(fu.getRevision());
+            postResponse1.setPath(fu.getPath());
+            postResponse1.setPath(fu.getPath());
+            postResponse1.setUserScope(fu.getUserScope());
+        });
+    }
+    @PostMapping(produces = {MediaType.APPLICATION_JSON_VALUE}, consumes = {MediaType.MULTIPART_FORM_DATA_VALUE})
+    public Mono<Response> post(
+            @RequestHeader("Authorization") String authorization,
+            @RequestPart("path") String path,
+            @RequestPart("file") Mono<FilePart> fileMono,
+            @PathVariable("user-scope") String userScope
+    ) {
+
+        return validUserScope(userScope)
+                .flatMap(it -> validPath(path))
+                .flatMap(it -> extractJwt(userScope, authorization))
                 .flatMap(it -> fileMono)
                 .map(filePart ->
                         new PostContextStage1(
@@ -283,32 +315,40 @@ public class UploadController {
                     );
                 })
                 .map(context -> {
-                    var uploadType = context._1;
                     var fu = context._2;
-                    var response = Scope.apply(new PostResponse(), postResponse1 -> {
-                        postResponse1.setFileName(fu.getPath());
-                        postResponse1.setSize(fu.getSize());
-                        postResponse1.setSha2(fu.getSha2());
-                        postResponse1.setSha3(fu.getSha3());
-
-                        postResponse1.setId(fu.getId());
-                        postResponse1.setRevision(fu.getRevision());
-                        postResponse1.setPath(fu.getPath());
-                        postResponse1.setPath(fu.getPath());
-                        postResponse1.setUserScope(fu.getUserScope());
-                    });
-
-                    return (Response) response;
+                    return (Response) toDto(fu);
                 })
                 .onErrorResume(it -> Mono.just(Scope.apply(new ErrorResponse(), postResponse1 -> {
                     it.printStackTrace();
                     postResponse1.setMsg(it.getMessage());
                 })))
                 ;
+    }
 
 
-//        var us = jwtService.getToken(userScope);
-//        System.out.println(String.format("Bearer %s", us));
+    @GetMapping
+    public Flux<Response> get(
+            @PathVariable("user-scope") String userScope,
+            @RequestHeader("Authorization") String authorization,
+            @RequestParam(value = "regex", required = false) String regex
+    ) {
+        return validUserScope(userScope)
+                .flatMap(it -> extractJwt(userScope, authorization))
+                .map(jwt->{
+                    if(regex!=null && !regex.equals("")){
+                        return Tuple.of(jwt, regex);
+                    } else{
+                        return Tuple.of(jwt, ".*");
+                    }
+                })
+                .flatMapMany(it->uploadFileRepo.findAllByUserScopeAndPathRegex(userScope, it._2))
+                .map(this::toDto)
+                .map(it->(Response)it)
+                .onErrorResume(it -> Mono.just(Scope.apply(new ErrorResponse(), postResponse1 -> {
+                    it.printStackTrace();
+                    postResponse1.setMsg(it.getMessage());
+                })))
+                ;
     }
 
     @Autowired

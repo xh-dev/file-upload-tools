@@ -26,6 +26,6 @@ public class DevConfig implements CustConfig {
 
     @Override
     public String keyPairDir() {
-        return "../";
+        return "./";
     }
 }

@@ -41,13 +41,13 @@ public class JwtService {
     public static final String SCOPE = "file-upload";
     static final String CLAIM_SCOPE = "scope";
     static final String CLAIM_USER_SCOPE = "user-scope";
-    public String getToken(String user){
+    public String getToken(String user, Optional<Integer> validateForDays){
         try{
             var algorithm = algorithm();
             var now = D.dt().now();
             return JWT.create()
                     .withIssuer(ISSUER)
-                    .withExpiresAt(now.addMonths(1).asDate())
+                    .withExpiresAt(now.addDays(validateForDays.orElse(30)).asDate())
                     .withClaim(CLAIM_SCOPE, List.of(SCOPE))
                     .withClaim(CLAIM_USER_SCOPE, user)
                     .sign(algorithm);
@@ -56,8 +56,7 @@ public class JwtService {
         }
 
     }
-    public Optional<DecodedJWT> verify(String token, String scope, String userScope) {
-        DecodedJWT decodedJWT;
+    public DecodedJWT verify(String token, String scope, String userScope) {
         try {
             JWTVerifier verifier = JWT.require(algorithm())
                     .withIssuer(ISSUER)
@@ -65,8 +64,7 @@ public class JwtService {
                     .withArrayClaim(CLAIM_SCOPE, scope)
                     .build();
 
-            decodedJWT = verifier.verify(token);
-            return Optional.of(decodedJWT);
+            return verifier.verify(token);
         } catch (JWTVerificationException | IOException exception){
             throw new RuntimeException(exception);
         }
