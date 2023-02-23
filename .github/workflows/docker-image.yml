@@ -14,11 +14,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - name: "Set Build ID
+    - name: "Set Build ID"
       run: echo "BUILD_ID=$(date +%s)" >> $GITHUB_ENV
     - name: "Show Build ID"
-      run: echo "${BUILD_ID}"
+      run: echo "Show ${BUILD_ID}"
     - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag file-upload-tools:$(date +%s)
+      run: docker build . --file Dockerfile --tag file-upload-tools:${BUILD_ID}
     - name: Rename to latest
-      run: docker image tag file-upload-tools:$(date +%s) file-upload-tools:latest
+      run: docker image tag file-upload-tools:${BUILD_ID} file-upload-tools:latest
