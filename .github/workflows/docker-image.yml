@@ -14,11 +14,20 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - name: "Set Build ID"
+    - name: Set Build ID
       run: echo "BUILD_ID=$(date +%s)" >> $GITHUB_ENV
+    - name: Set repo name
+      run: echo "REPO_NAME=file-upload-tools" >> $GITHUB_ENV
+    - name: Login to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
     - name: "Show Build ID"
       run: echo "Show ${BUILD_ID}"
     - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag file-upload-tools:${BUILD_ID}
-    - name: Rename to latest
-      run: docker image tag file-upload-tools:${BUILD_ID} file-upload-tools:latest
+      run: docker build . --file Dockerfile --tag ${REPO_NAME}:${BUILD_ID}
+    - name: Push image
+      run: docker image push ${REPO_NAME}:${BUILD_ID} ${username}/${REPO_NAME}:${BUILD_ID}
+    - name: Push image
+      run: docker image push ${REPO_NAME}:${BUILD_ID} ${username}/file-upload-tools:latest
