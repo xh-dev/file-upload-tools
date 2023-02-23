@@ -29,6 +29,10 @@ jobs:
     - name: Build the Docker image
       run: docker build . --file Dockerfile --tag ${REPO_NAME}:${BUILD_ID}
     - name: Push image
-      run: docker image push ${REPO_NAME}:${BUILD_ID} ${{ secrets.DOCKER_USERNAME }}/${REPO_NAME}:${BUILD_ID}
+      env:
+        username: ${{ secrets.DOCKER_USERNAME }}
+      run: docker image push ${REPO_NAME}:${BUILD_ID} ${username}/${REPO_NAME}:${BUILD_ID}
     - name: Push image
-      run: docker image push ${REPO_NAME}:${BUILD_ID} ${{ secrets.DOCKER_USERNAME }}/file-upload-tools:latest
+      env:
+        username: ${{ secrets.DOCKER_USERNAME }}
+      run: docker image push ${REPO_NAME}:${BUILD_ID} ${username}/${REPO_NAME}:latest
