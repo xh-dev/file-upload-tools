@@ -16,3 +16,5 @@ jobs:
     - uses: actions/checkout@v3
     - name: Build the Docker image
       run: docker build . --file Dockerfile --tag file-upload-tools:$(date +%s)
+    - name: Rename to latest
+      run: docker image tag file-upload-tools:$(date +%s) file-upload-tools:latest
